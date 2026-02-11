@@ -119,6 +119,7 @@ function wp_psynct_render_settings_page() {
                         <tr>
                             <th>Target URL</th>
                             <th>Key</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
                     <tbody id="psynct-target-rows">
@@ -140,6 +141,15 @@ function wp_psynct_render_settings_page() {
                                     name="<?php echo WP_PSYNCT_OPTION; ?>[targets][<?php echo esc_attr($index); ?>][key]"
                                     value="<?php echo esc_attr($target['key']); ?>"
                                     class="regular-text">
+                            </td>
+                            <td>
+                                <button type="submit"
+                                    name="psync_remove_target"
+                                    value="<?php echo esc_attr($index); ?>"
+                                    class="button button-secondary"
+                                    onclick="return confirm('Remove this target connection?');">
+                                    Remove
+                                </button>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -203,4 +213,32 @@ function wp_psynct_render_settings_page() {
     </div>
 
     <?php
+}
+
+// Remove the target
+add_action('admin_init', 'wp_psynct_handle_remove_target');
+
+function wp_psynct_handle_remove_target() {
+
+    if (!is_admin()) return;
+
+    if (!current_user_can('manage_options')) return;
+
+    if (!isset($_POST['psync_remove_target'])) return;
+
+    check_admin_referer('wp_psynct_group-options');
+
+    $remove_key = sanitize_text_field($_POST['psync_remove_target']);
+
+    $settings = get_option(WP_PSYNCT_OPTION, []);
+
+    if (!empty($settings['targets'][$remove_key])) {
+
+        unset($settings['targets'][$remove_key]);
+
+        update_option(WP_PSYNCT_OPTION, $settings);
+    }
+
+    wp_redirect(admin_url('admin.php?page=wp-psynct'));
+    exit;
 }
