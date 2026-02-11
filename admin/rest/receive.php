@@ -43,6 +43,17 @@ add_action('rest_api_init', function () {
             ],
         ]
     ]);
+
+
+    // Disconnect target
+    
+
+    register_rest_route('psync/v1', '/disconnect', [
+        'methods'  => 'POST',
+        'callback' => 'wp_psynct_disconnect_target',
+        'permission_callback' => '__return_true'
+    ]);
+
 });
 
 
@@ -88,6 +99,10 @@ function wp_psynct_receive_post(WP_REST_Request $request) {
 
     $data = json_decode($raw_body, true);
 
+    $host_domain = strtolower(
+        preg_replace('/^www\./', '', sanitize_text_field($data['host_domain']))
+    );
+    
     if (!$data || empty($data['host_post_id']) || empty($data['title'])) {
         return new WP_REST_Response(['message'=>'Invalid payload'], 400);
     }
@@ -116,12 +131,11 @@ function wp_psynct_receive_post(WP_REST_Request $request) {
     
     if (!empty($language) && !empty($api_key) && !empty($original_content)) {
     
-        $translation_result = wp_psynct_translate_gutenberg_content(
+        $translation_result = wp_psynct_translate_content(
             $original_content,
             $language,
             $api_key
         );
-    
         if (is_wp_error($translation_result)) {
     
             wp_psynct_log([
@@ -280,7 +294,7 @@ function wp_psynct_translate_gutenberg_content($content, $language, $api_key) {
         // Only translate blocks with inner HTML
         if (!empty($block['innerHTML'])) {
 
-            $translated = wp_psynct_translate_chunk(
+            $translated = wp_psynct_translate_content(
                 $block['innerHTML'],
                 $language,
                 $api_key
@@ -312,7 +326,7 @@ function wp_psynct_translate_nested_blocks($blocks, $language, $api_key) {
 
         if (!empty($block['innerHTML'])) {
 
-            $translated = wp_psynct_translate_chunk(
+           $translated = wp_psynct_translate_content(
                 $block['innerHTML'],
                 $language,
                 $api_key
@@ -341,7 +355,7 @@ function wp_psynct_translate_nested_blocks($blocks, $language, $api_key) {
 function wp_psynct_translate_chunk($chunk, $language, $api_key) {
 
     $response = wp_remote_post('https://api.openai.com/v1/chat/completions', [
-        'timeout' => 30,
+        'timeout' => 60,
         'headers' => [
             'Authorization' => 'Bearer ' . $api_key,
             'Content-Type'  => 'application/json'
@@ -376,9 +390,18 @@ function wp_psynct_translate_chunk($chunk, $language, $api_key) {
     $body = wp_remote_retrieve_body($response);
     $decoded = json_decode($body, true);
 
-    if (empty($decoded['choices'][0]['message']['content'])) {
-        return new WP_Error('translation_failed', 'Invalid API response');
+    error_log('OpenAI raw response: ' . $body);
+    if (!empty($decoded['error'])) {
+        return new WP_Error(
+            'translation_failed',
+            $decoded['error']['message']
+        );
     }
+    
+    if (empty($decoded['choices'][0]['message']['content'])) {
+        return new WP_Error('translation_failed', 'Empty translation response');
+    }
+
     $content = trim($decoded['choices'][0]['message']['content']);
 
     // Remove accidental ```html wrappers
@@ -386,12 +409,12 @@ function wp_psynct_translate_chunk($chunk, $language, $api_key) {
     $content = preg_replace('/^```/i', '', $content);
     $content = preg_replace('/```$/i', '', $content);
     
-    // Normalize smart quotes back to standard quotes
-    $content = str_replace(
-        ['“','”','‘','’'],
-        ['"','"',"'", "'"],
-        $content
-    );
+    // // Normalize smart quotes back to standard quotes
+    // $content = str_replace(
+    //     ['“','”','‘','’'],
+    //     ['"','"',"'", "'"],
+    //     $content
+    // );
 
     $content = str_replace('`html`', 'html', $content);
     $content = str_replace('`', '', $content);
@@ -400,23 +423,125 @@ function wp_psynct_translate_chunk($chunk, $language, $api_key) {
     
 }
 
+function wp_psynct_split_content_into_chunks($content, $size = 2500) {
+
+    $chunks = [];
+    $length = strlen($content);
+
+    for ($i = 0; $i < $length; $i += $size) {
+        $chunks[] = substr($content, $i, $size);
+    }
+
+    return $chunks;
+}
+
 
 function wp_psynct_translate_content($content, $language, $api_key) {
 
-    $chunks = wp_psynct_split_content_into_chunks($content, 2000);
+    $chunks = wp_psynct_split_content_into_chunks($content, 2500);
 
     $translated = '';
 
     foreach ($chunks as $chunk) {
 
-        $result = wp_psynct_translate_chunk($chunk, $language, $api_key);
+        $response = wp_remote_post('https://api.openai.com/v1/chat/completions', [
+            'timeout' => 60,
+            'headers' => [
+                'Authorization' => 'Bearer ' . $api_key,
+                'Content-Type'  => 'application/json'
+            ],
+            'body' => wp_json_encode([
+                'model' => 'gpt-4o-mini',
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => 'You are a strict HTML translator.
+                            Return ONLY valid HTML.
+                            Do NOT use markdown.
+                            Do NOT use backticks.
+                            Preserve all HTML tags exactly.'
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => "Translate the following HTML content to {$language} and return only translated HTML:\n\n{$chunk}"
+                    ]
+                ],
+                'temperature' => 0.2
+            ])
+        ]);
 
-        if (is_wp_error($result)) {
-            return $result;
+        if (is_wp_error($response)) {
+            return $response;
         }
 
-        $translated .= $result;
+        $body = wp_remote_retrieve_body($response);
+        $decoded = json_decode($body, true);
+
+        if (!empty($decoded['error'])) {
+            return new WP_Error('translation_failed', $decoded['error']['message']);
+        }
+
+        if (empty($decoded['choices'][0]['message']['content'])) {
+            return new WP_Error('translation_failed', 'Empty translation response');
+        }
+
+        $piece = trim($decoded['choices'][0]['message']['content']);
+
+        // Cleanup
+        $piece = preg_replace('/^```html/i', '', $piece);
+        $piece = preg_replace('/^```/i', '', $piece);
+        $piece = preg_replace('/```$/i', '', $piece);
+        $piece = str_replace('`', '', $piece);
+
+        $translated .= trim($piece);
     }
 
     return $translated;
+}
+
+
+function wp_psynct_disconnect_target(WP_REST_Request $request) {
+
+    $settings = get_option(WP_PSYNCT_OPTION, []);
+
+    if (($settings['mode'] ?? '') !== 'target') {
+        return new WP_REST_Response(['message' => 'Not in target mode'], 403);
+    }
+
+    $headers = $request->get_headers();
+
+    $key  = $headers['x_psync_key'][0] ?? '';
+    $sign = $headers['x_psync_sign'][0] ?? '';
+    $domain = $headers['x_psync_domain'][0] ?? '';
+
+    if (!$key || !$sign || !$domain) {
+        return new WP_REST_Response(['message' => 'Missing headers'], 401);
+    }
+
+    if ($key !== ($settings['target_key'] ?? '')) {
+        return new WP_REST_Response(['message' => 'Invalid key'], 401);
+    }
+
+    $raw_body = $request->get_body();
+    $calc = hash_hmac('sha256', $raw_body, $settings['target_key']);
+
+    if (!hash_equals($calc, $sign)) {
+        return new WP_REST_Response(['message' => 'Signature mismatch'], 403);
+    }
+
+    // Clear connection
+    $settings['target_key'] = '';
+    update_option(WP_PSYNCT_OPTION, $settings);
+
+    wp_psynct_log([
+        'role' => 'target',
+        'action' => 'disconnect',
+        'status' => 'success',
+        'message' => 'Connection removed by host'
+    ]);
+
+    return new WP_REST_Response([
+        'status' => 'success',
+        'message' => 'Disconnected successfully'
+    ], 200);
 }

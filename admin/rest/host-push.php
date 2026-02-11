@@ -6,13 +6,19 @@ if (!defined('ABSPATH')) exit;
    TRIGGER ON POST SAVE
 ------------------------------------------------------- */
 
-add_action('save_post_post', 'wp_psynct_maybe_push_post', 20, 3);
+add_action('save_post_post', 'wp_psynct_maybe_push_post', 20, 3 );
 
-function wp_psynct_maybe_push_post($post_id, $post, $update) {
+function wp_psynct_maybe_push_post($post_id, $post, $update ) {
 
     // Prevent autosave / revisions
+    if (defined('WP_PSYNCT_RUNNING')) return;
+        define('WP_PSYNCT_RUNNING', true);
+
     if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
     if (wp_is_post_revision($post_id)) return;
+
+    // Prevent internal updates triggering push again
+    if (did_action('wp_psynct_internal_update')) return;
 
     // Only publish posts
     if ($post->post_status !== 'publish') return;
@@ -45,7 +51,15 @@ function wp_psynct_push_to_targets($post_id, $post, $targets) {
         'host_domain'  => parse_url(home_url(), PHP_URL_HOST),
     ];
 
+    // echo "<pre>".print_r($payload,1)."</pre>";
     // Push thumbnail
+    error_log('CATS: ' . print_r(
+        wp_get_post_terms($post_id, 'category', ['fields'=>'names']),
+        true
+    ));
+
+    error_log('PSYNC PAYLOAD: ' . print_r($payload, true));
+
     $thumb_id = get_post_thumbnail_id($post_id);
 
     if ($thumb_id) {
@@ -55,6 +69,9 @@ function wp_psynct_push_to_targets($post_id, $post, $targets) {
             $payload['featured_image'] = esc_url_raw($image_url);
         }
     }
+
+    error_log('THUMB ID: ' . get_post_thumbnail_id($post_id));
+    error_log('THUMB URL: ' . wp_get_attachment_url(get_post_thumbnail_id($post_id)));  
 
     $json = wp_json_encode($payload);
 

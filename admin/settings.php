@@ -221,9 +221,7 @@ add_action('admin_init', 'wp_psynct_handle_remove_target');
 function wp_psynct_handle_remove_target() {
 
     if (!is_admin()) return;
-
     if (!current_user_can('manage_options')) return;
-
     if (!isset($_POST['psync_remove_target'])) return;
 
     check_admin_referer('wp_psynct_group-options');
@@ -232,12 +230,54 @@ function wp_psynct_handle_remove_target() {
 
     $settings = get_option(WP_PSYNCT_OPTION, []);
 
-    if (!empty($settings['targets'][$remove_key])) {
+    if (empty($settings['targets'][$remove_key])) return;
 
-        unset($settings['targets'][$remove_key]);
+    $target = $settings['targets'][$remove_key];
 
-        update_option(WP_PSYNCT_OPTION, $settings);
+    $endpoint = trailingslashit($target['target_url']) . 'wp-json/psync/v1/disconnect';
+
+    $payload = [
+        'host_domain' => parse_url(home_url(), PHP_URL_HOST)
+    ];
+
+    $json = wp_json_encode($payload);
+    $signature = hash_hmac('sha256', $json, $target['key']);
+
+    $response = wp_remote_post($endpoint, [
+        'timeout' => 20,
+        'headers' => [
+            'Content-Type'   => 'application/json',
+            'X-PSYNC-KEY'    => $target['key'],
+            'X-PSYNC-SIGN'   => $signature,
+            'X-PSYNC-DOMAIN' => parse_url(home_url(), PHP_URL_HOST),
+        ],
+        'body' => $json
+    ]);
+
+    if (is_wp_error($response)) {
+
+        wp_psynct_log([
+            'role' => 'host',
+            'action' => 'disconnect',
+            'target_url' => $target['target_url'],
+            'status' => 'failed',
+            'message' => $response->get_error_message()
+        ]);
+
+    } else {
+
+        wp_psynct_log([
+            'role' => 'host',
+            'action' => 'disconnect',
+            'target_url' => $target['target_url'],
+            'status' => 'success',
+            'message' => 'Target notified'
+        ]);
     }
+
+    // Remove locally regardless of remote success
+    unset($settings['targets'][$remove_key]);
+    update_option(WP_PSYNCT_OPTION, $settings);
 
     wp_redirect(admin_url('admin.php?page=wp-psynct'));
     exit;
