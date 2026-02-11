@@ -6,33 +6,24 @@ if (!defined('ABSPATH')) exit;
    TRIGGER ON POST SAVE
 ------------------------------------------------------- */
 
-add_action('save_post_post', 'wp_psynct_maybe_push_post', 20, 3 );
 
-function wp_psynct_maybe_push_post($post_id, $post, $update ) {
+add_action('wp_after_insert_post', 'wp_psynct_maybe_push_post', 99, 4);
 
-    // Prevent autosave / revisions
-    if (defined('WP_PSYNCT_RUNNING')) return;
-        define('WP_PSYNCT_RUNNING', true);
+function wp_psynct_maybe_push_post($post_id, $post, $update, $post_before) {
+
 
     if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
     if (wp_is_post_revision($post_id)) return;
-
-    // Prevent internal updates triggering push again
-    if (did_action('wp_psynct_internal_update')) return;
-
-    // Only publish posts
+    if ($post->post_type !== 'post') return;
     if ($post->post_status !== 'publish') return;
+
+    // 🔥 Only push on final update cycle
+    if (!$update) return;
 
     $settings = get_option(WP_PSYNCT_OPTION, []);
 
-    // Only in host mode
-    if (!isset($settings['mode']) || $settings['mode'] !== 'host') {
-        return;
-    }
-
-    if (empty($settings['targets'])) {
-        return;
-    }
+    if (($settings['mode'] ?? '') !== 'host') return;
+    if (empty($settings['targets'])) return;
 
     wp_psynct_push_to_targets($post_id, $post, $settings['targets']);
 }

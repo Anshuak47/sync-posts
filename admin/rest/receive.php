@@ -124,8 +124,11 @@ function wp_psynct_receive_post(WP_REST_Request $request) {
     /* ---------------- TRANSLATION ---------------- */
 
     $original_content = $data['content'] ?? '';
+    $original_title   = $data['title'] ?? '';
+
     $translated_content = $original_content;
-    
+    $translated_title   = $original_title;
+
     $language = $settings['translation_language'] ?? '';
     $api_key  = $settings['chatgpt_api_key'] ?? '';
     
