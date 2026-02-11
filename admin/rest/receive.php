@@ -132,35 +132,60 @@ function wp_psynct_receive_post(WP_REST_Request $request) {
     $language = $settings['translation_language'] ?? '';
     $api_key  = $settings['chatgpt_api_key'] ?? '';
     
-    if (!empty($language) && !empty($api_key) && !empty($original_content)) {
-    
-        $translation_result = wp_psynct_translate_content(
-            $original_content,
-            $language,
-            $api_key
-        );
-        if (is_wp_error($translation_result)) {
-    
-            wp_psynct_log([
-                'role' => 'target',
-                'action' => 'translation',
-                'host_post_id' => intval($data['host_post_id']),
-                'status' => 'failed',
-                'message' => $translation_result->get_error_message()
-            ]);
-    
-            return new WP_REST_Response([
-                'message' => 'Translation failed'
-            ], 500);
+    if (!empty($language) && !empty($api_key) )  {
+
+        // Translate title
+        if (!empty($original_title)) {
+
+            $title_translation = wp_psynct_translate_plain_text(
+                $original_title,
+                $language,
+                $api_key
+            );
+
+            if (!is_wp_error($title_translation)) {
+                $translated_title = $title_translation;
+            }
         }
-    
-        $translated_content = $translation_result;
+
+        // Translate content (chunked)
+        if (!empty($original_content)) {
+
+            $translation_result = wp_psynct_translate_content(
+                $original_content,
+                $language,
+                $api_key
+            );
+
+            
+            if (is_wp_error($translation_result)) {
+        
+                wp_psynct_log([
+                    'role' => 'target',
+                    'action' => 'translation',
+                    'host_post_id' => intval($data['host_post_id']),
+                    'status' => 'failed',
+                    'message' => $translation_result->get_error_message()
+                ]);
+        
+                return new WP_REST_Response([
+                    'message' => 'Translation failed'
+                ], 500);
+            }
+        
+            $translated_content = $translation_result;
+        }
+
+
+       
+
+
     }
     
     $postarr = [
         'post_type'    => 'post',
         'post_status'  => 'publish',
-        'post_title'   => sanitize_text_field($data['title']),
+        'post_title'   => sanitize_text_field($translated_title),
         'post_content' => $translated_content,
         'post_excerpt' => sanitize_text_field($data['excerpt']),
         'post_name' => sanitize_title($data['slug']),
@@ -284,76 +309,44 @@ function wp_psynct_receive_post(WP_REST_Request $request) {
     ],200);
 }
 
-function wp_psynct_translate_gutenberg_content($content, $language, $api_key) {
+// Translate title
+function wp_psynct_translate_plain_text($text, $language, $api_key) {
 
-    $blocks = parse_blocks($content);
+    $response = wp_remote_post('https://api.openai.com/v1/chat/completions', [
+        'timeout' => 30,
+        'headers' => [
+            'Authorization' => 'Bearer ' . $api_key,
+            'Content-Type'  => 'application/json'
+        ],
+        'body' => wp_json_encode([
+            'model' => 'gpt-4o-mini',
+            'messages' => [
+                [
+                    'role' => 'system',
+                    'content' => 'You are a translator. Translate the given text only. Return plain text only. No markdown. No quotes.'
+                ],
+                [
+                    'role' => 'user',
+                    'content' => "Translate to {$language}:\n\n{$text}"
+                ]
+            ],
+            'temperature' => 0.2
+        ])
+    ]);
 
-    if (empty($blocks)) {
-        return $content;
+    if (is_wp_error($response)) {
+        return $response;
     }
 
-    foreach ($blocks as &$block) {
+    $body = wp_remote_retrieve_body($response);
+    $decoded = json_decode($body, true);
 
-        // Only translate blocks with inner HTML
-        if (!empty($block['innerHTML'])) {
-
-            $translated = wp_psynct_translate_content(
-                $block['innerHTML'],
-                $language,
-                $api_key
-            );
-
-            if (is_wp_error($translated)) {
-                return $translated;
-            }
-
-            $block['innerHTML'] = $translated;
-        }
-
-        // Recursively handle nested blocks
-        if (!empty($block['innerBlocks'])) {
-            $block['innerBlocks'] = wp_psynct_translate_nested_blocks(
-                $block['innerBlocks'],
-                $language,
-                $api_key
-            );
-        }
+    if (empty($decoded['choices'][0]['message']['content'])) {
+        return new WP_Error('translation_failed', 'Invalid API response');
     }
 
-    return serialize_blocks($blocks);
+    return trim($decoded['choices'][0]['message']['content']);
 }
-
-function wp_psynct_translate_nested_blocks($blocks, $language, $api_key) {
-
-    foreach ($blocks as &$block) {
-
-        if (!empty($block['innerHTML'])) {
-
-           $translated = wp_psynct_translate_content(
-                $block['innerHTML'],
-                $language,
-                $api_key
-            );
-
-            if (is_wp_error($translated)) {
-                return $translated;
-            }
-
-            $block['innerHTML'] = $translated;
-        }
-
-        if (!empty($block['innerBlocks'])) {
-            $block['innerBlocks'] = wp_psynct_translate_nested_blocks(
-                $block['innerBlocks'],
-                $language,
-                $api_key
-            );
-        }
-    }
-
-    return $blocks;
-}
-
 
 function wp_psynct_translate_chunk($chunk, $language, $api_key) {
 
