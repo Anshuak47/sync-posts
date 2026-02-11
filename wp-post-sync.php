@@ -94,6 +94,16 @@ add_action('admin_menu', function () {
         'dashicons-randomize',
         80
     );
+
+    // Add log page
+    add_submenu_page(
+        'wp-psynct',
+        'Sync Logs',
+        'Logs',
+        'manage_options',
+        'wp-psynct-logs',
+        'wp_psynct_render_logs_page'
+    );
 });
 
 // Enqueue admin styles and scripts
@@ -137,6 +147,8 @@ add_action('admin_init', function () {
 
 if (is_admin()) {
     require_once WP_PSYNCT_PATH . 'admin/settings.php';
+    require_once WP_PSYNCT_PATH . 'admin/logs.php';
+
 }
 
 /* ---------------- LOAD REST ---------------- */
