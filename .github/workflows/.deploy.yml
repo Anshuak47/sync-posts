@@ -15,7 +15,7 @@ jobs:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          server-dir: "assignment.anshukushwaha.com/wp-content/plugins/wp-post-sync"
+          server-dir: "assignment.anshukushwaha.com/wp-content/plugins/wp-post-sync/"
           local-dir: "./"
           protocol: ftps
           exclude: |
