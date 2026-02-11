@@ -6,73 +6,59 @@ if (!defined('ABSPATH')) exit;
 
 function wp_psynct_sanitize_settings($input) {
 
-    $output = [];
+    $existing = get_option(WP_PSYNCT_OPTION, []);
+    $output   = $existing;
 
     $mode = isset($input['mode']) ? sanitize_text_field($input['mode']) : 'host';
     $output['mode'] = in_array($mode, ['host', 'target']) ? $mode : 'host';
 
     /* ---------------- HOST MODE ---------------- */
 
-    if ($output['mode'] === 'host') {
+    if (isset($input['targets']) && is_array($input['targets'])) {
 
         $output['targets'] = [];
 
-        if (!empty($input['targets']) && is_array($input['targets'])) {
+        foreach ($input['targets'] as $row_key => $row) {
 
-            foreach ($input['targets'] as $row) {
+            $url = isset($row['target_url']) ? esc_url_raw($row['target_url']) : '';
+            $existing_key = isset($row['key']) ? sanitize_text_field($row['key']) : '';
 
-                $url = isset($row['target_url']) ? esc_url_raw($row['target_url']) : '';
-                $existing_key = isset($row['key']) ? sanitize_text_field($row['key']) : '';
+            if (!$url) continue;
 
-                if (!$url) {
-                    continue;
-                }
+            $parsed = wp_parse_url($url);
+            $domain = isset($parsed['host']) ? sanitize_text_field($parsed['host']) : '';
 
-                $parsed = wp_parse_url($url);
-                $domain = isset($parsed['host']) ? sanitize_text_field($parsed['host']) : '';
+            $key = ($existing_key && strlen($existing_key) >= 16)
+                ? $existing_key
+                : wp_generate_password(32, false, false);
 
-                // Preserve existing key (non-editable)
-                if ($existing_key && strlen($existing_key) >= 16) {
-                    $key = $existing_key;
-                } else {
-                    $key = wp_generate_password(32, false, false);
-                }
-
-                $output['targets'][] = [
-                    'target_url' => $url,
-                    'domain'     => $domain,
-                    'key'        => $key
-                ];
-            }
+            $output['targets'][$row_key] = [
+                'target_url' => $url,
+                'domain'     => $domain,
+                'key'        => $key
+            ];
         }
-
     }
 
     /* ---------------- TARGET MODE ---------------- */
 
-    if ($output['mode'] === 'target') {
+    if (isset($input['target_key'])) {
+        $output['target_key'] = sanitize_text_field($input['target_key']);
+    }
 
+    if (isset($input['translation_language'])) {
         $allowed = ['French', 'Spanish', 'Hindi'];
+        $lang = sanitize_text_field($input['translation_language']);
+        $output['translation_language'] = in_array($lang, $allowed) ? $lang : 'French';
+    }
 
-        $output['target_key'] = isset($input['target_key'])
-            ? sanitize_text_field($input['target_key'])
-            : '';
-
-        $lang = isset($input['translation_language'])
-            ? sanitize_text_field($input['translation_language'])
-            : 'French';
-
-        $output['translation_language'] = in_array($lang, $allowed)
-            ? $lang
-            : 'French';
-
-        $output['chatgpt_api_key'] = isset($input['chatgpt_api_key'])
-            ? sanitize_text_field($input['chatgpt_api_key'])
-            : '';
+    if (isset($input['chatgpt_api_key'])) {
+        $output['chatgpt_api_key'] = sanitize_text_field($input['chatgpt_api_key']);
     }
 
     return $output;
 }
+
 
 
 /* -------------------------------------------------------
@@ -86,6 +72,7 @@ function wp_psynct_render_settings_page() {
     }
 
     $settings = get_option(WP_PSYNCT_OPTION, []);
+    // echo "<pre>".print_r($settings,1)."</pre>";
     $mode = isset($settings['mode']) ? $settings['mode'] : 'host';
     ?>
 

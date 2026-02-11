@@ -31,22 +31,24 @@ document.addEventListener("DOMContentLoaded", function () {
   if (btn) {
     btn.addEventListener("click", function () {
       const tbody = document.getElementById("psynct-target-rows");
-      const index = tbody.children.length;
+      const index = Date.now();
+
+      const option = psyncData.optionName;
 
       const row = `
-            <tr>
-                <td>
-                    <input type="url"
-                        name="<?php echo WP_PSYNCT_OPTION; ?>[targets][${index}][target_url]"
-                        class="regular-text">
-                </td>
-                <td>
-                    <input type="text"
-                        readonly
-                        name="<?php echo WP_PSYNCT_OPTION; ?>[targets][${index}][key]"
-                        class="regular-text">
-                </td>
-            </tr>`;
+        <tr>
+            <td>
+                <input type="url"
+                    name="${option}[targets][${index}][target_url]"
+                    class="regular-text">
+            </td>
+            <td>
+                <input type="text"
+                    readonly
+                    name="${option}[targets][${index}][key]"
+                    class="regular-text">
+            </td>
+        </tr>`;
 
       tbody.insertAdjacentHTML("beforeend", row);
     });

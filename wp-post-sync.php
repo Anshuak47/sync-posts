@@ -127,6 +127,14 @@ add_action('admin_enqueue_scripts', function ($hook) {
         time(),
         true
     );
+
+    wp_localize_script(
+        'wp-psynct-admin',
+        'psyncData',
+        [
+            'optionName' => WP_PSYNCT_OPTION
+        ]
+    );
 });
 
 
